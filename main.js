@@ -31,6 +31,10 @@ let MaterialGettersCache = [];
 let SoundGettersCache = [];
 let AllTexturesCache = [];
 
+const droppedVmf = process.argv
+  .map(removePathQuotes)
+  .find(a => a.toLowerCase().endsWith('.vmf') && fs.existsSync(a));
+
 const modelsVariants = ['.mdl', '.vvd', '.phy', '.dx90.vtx', '.dx80.vtx', '.sw.vtx', '.ani'];
 
 // --- Entry Point ---
@@ -491,14 +495,20 @@ async function setup(skip, gamepath) {
         console.log(`📜 Please enter the following information`);
       }
 
-      const commonProperties = {
+      const fileProperty = {
         file: {
           description: '📄 VMF File (C:\\path\\to\\file.vmf) >',
           required: true,
           conform: value => removePathQuotes(value).endsWith('.vmf') && fs.existsSync(removePathQuotes(value)),
           message: 'Invalid file',
           before: value => removePathQuotes(value)
-        },
+        }
+      };
+      if (droppedVmf && !skip) {
+        console.log(`📄 • \x1b[32mVMF reçu par glisser-déposer : \x1b[37m${droppedVmf}\x1b[0m`);
+      }
+      const commonProperties = {
+        ...(droppedVmf ? {} : fileProperty),
         sounds: getInputValidator('🔊 Extract Sounds'),
         materials: getInputValidator('🧱 Extract Materials'),
         models: getInputValidator('📐 Extract Models'),
@@ -532,13 +542,13 @@ async function setup(skip, gamepath) {
         };
         prompt.get({ properties: { ...inputProperties } }, async function (err, result) {
           if (err) throw err;
-          await script(result.gamepath, result.file, result.materials === 'y', result.models === 'y', result.sounds === 'y', result.publish === 'y');
+          await script(result.gamepath, result.file ?? droppedVmf, result.materials === 'y', result.models === 'y', result.sounds === 'y', result.publish === 'y');
         });
       } else if (gamepath) {
         const inputProperties = { ...commonProperties };
         prompt.get({ properties: { ...inputProperties } }, async function (err, result) {
           if (err) throw err;
-          await script(gamepath, result.file, result.materials === 'y', result.models === 'y', result.sounds === 'y', result.publish === 'y');
+          await script(gamepath, result.file ?? droppedVmf, result.materials === 'y', result.models === 'y', result.sounds === 'y', result.publish === 'y');
         });
       }
     });
