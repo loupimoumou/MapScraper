@@ -12,6 +12,13 @@ const { version } = require('./package.json');
 const { spawn } = require('child_process');
 const colors = require('@colors/colors');
 const figlet = require('figlet');
+const { getAddonRoots, createResolver } = require('./lib/assetResolver');
+
+let currentGamepath = '';
+let resolveAsset = (relPath) => {
+  const full = path.join(currentGamepath, relPath);
+  return fs.existsSync(full) ? full : null;
+};
 
 const githubUser = 'SpySpaille';
 const latestURL = `https://raw.githubusercontent.com/${githubUser}/MapScraper/main/package.json`;
@@ -123,9 +130,10 @@ async function VTFfromVMT(gamepath, sourcePath, outputDir) {
       const values = vmtMap.get(getter);
       if (values && values.length > 0) {
         for (const value of values) {
-          const vmtPath = path.join(gamepath, 'materials', value.replace('.vmt', '') + '.vmt');
-          if (fs.existsSync(vmtPath)) {
-            fse.copySync(vmtPath, path.join(outputDir, 'materials', value.replace('.vmt', '') + '.vmt'));
+          const vmtRel = path.join('materials', value.replace('.vmt', '') + '.vmt');
+          const vmtPath = resolveAsset(vmtRel);
+          if (vmtPath) {
+            fse.copySync(vmtPath, path.join(outputDir, vmtRel));
             await VTFfromVMT(gamepath, vmtPath, outputDir);
           }
         }
@@ -137,16 +145,16 @@ async function VTFfromVMT(gamepath, sourcePath, outputDir) {
       if (!AllTexturesCache.includes(texture)) {
         AllTexturesCache.push(texture);
 
-        const sourcePathVTF = path.join(gamepath, 'materials', texture + '.vtf');
-        if (fs.existsSync(sourcePathVTF)) {
-          const destPath = path.join(outputDir, 'materials', texture + '.vtf');
-          await fse.copy(sourcePathVTF, destPath);
+        const vtfRel = path.join('materials', texture + '.vtf');
+        const sourcePathVTF = resolveAsset(vtfRel);
+        if (sourcePathVTF) {
+          await fse.copy(sourcePathVTF, path.join(outputDir, vtfRel));
         }
 
-        const hdrSourcePath = path.join(gamepath, 'materials', texture + '.hdr.vtf');
-        if (fs.existsSync(hdrSourcePath)) {
-          const hdrDestPath = path.join(outputDir, 'materials', texture + '.hdr.vtf');
-          await fse.copy(hdrSourcePath, hdrDestPath);
+        const hdrRel = path.join('materials', texture + '.hdr.vtf');
+        const hdrSourcePath = resolveAsset(hdrRel);
+        if (hdrSourcePath) {
+          await fse.copy(hdrSourcePath, path.join(outputDir, hdrRel));
         }
       }
     }
@@ -193,7 +201,8 @@ async function getMaterials(gamepath, vmfContent, outputDir) {
 
   // Copy VMTs and extract textures
   for (const material of materials) {
-    const sourcePath = path.join(gamepath, 'materials', material + '.vmt');
+    const sourcePath = resolveAsset(path.join('materials', material + '.vmt'));
+    if (!sourcePath) continue;
     const destPath = path.join(outputDir, 'materials', material.toLowerCase() + '.vmt');
     try {
       fse.copySync(sourcePath, destPath);
@@ -210,17 +219,18 @@ async function getMaterials(gamepath, vmfContent, outputDir) {
       let match;
       while ((match = regex.exec(vmfContent))) {
         let vtf = match[1].replace(/\.vtf$/i, '').replace(/\\/g, '/');
-        const sourcePath = path.join(gamepath, 'materials', vtf + '.vtf');
-        const destPath = path.join(outputDir, 'materials', vtf + '.vtf');
-        fse.ensureDirSync(path.dirname(destPath));
-        if (fs.existsSync(sourcePath)) {
+        const vtfRel = path.join('materials', vtf + '.vtf');
+        const sourcePath = resolveAsset(vtfRel);
+        if (sourcePath) {
+          const destPath = path.join(outputDir, vtfRel);
+          fse.ensureDirSync(path.dirname(destPath));
           fse.copySync(sourcePath, destPath);
         }
         // Also copy .hdr.vtf if present
-        const hdrSourcePath = path.join(gamepath, 'materials', vtf + '.hdr.vtf');
-        const hdrDestPath = path.join(outputDir, 'materials', vtf + '.hdr.vtf');
-        if (fs.existsSync(hdrSourcePath)) {
-          fse.copySync(hdrSourcePath, hdrDestPath);
+        const hdrRel = path.join('materials', vtf + '.hdr.vtf');
+        const hdrSourcePath = resolveAsset(hdrRel);
+        if (hdrSourcePath) {
+          fse.copySync(hdrSourcePath, path.join(outputDir, hdrRel));
         }
       }
     }
@@ -249,26 +259,30 @@ async function getModels(gamepath, vmfContent, outputDir) {
 
   for (const model of models) {
     for (const variant of modelsVariants) {
-      const sourcePath = path.join(gamepath, model.replace('.mdl', variant));
-      const destPath = path.join(outputDir, model.replace('.mdl', variant));
+      const variantRel = model.replace('.mdl', variant);
+      const sourcePath = resolveAsset(variantRel);
+      if (!sourcePath) continue;
       try {
-        fse.copySync(sourcePath, destPath);
+        fse.copySync(sourcePath, path.join(outputDir, variantRel));
       } catch (error) {
         handleError(error);
       }
     }
     try {
-      const mdlData = fs.readFileSync(path.join(gamepath, model));
+      const mdlPath = resolveAsset(model);
+      if (!mdlPath) continue;
+      const mdlData = fs.readFileSync(mdlPath);
       const mdl = new MDL();
       mdl.import({ mdlData });
       const textures = mdl.getMetadata().textures.map(texture => texture.toLowerCase());
       const textureDirs = mdl.getMetadata().textureDirs.map(textureDir => textureDir.toLowerCase());
       for (const textureDir of textureDirs) {
         for (const texture of textures) {
-          const sourcePath = path.join(gamepath, 'materials', textureDir, texture + '.vmt');
-          const destPath = path.join(outputDir, 'materials', textureDir, texture + '.vmt');
+          const vmtRel = path.join('materials', textureDir, texture + '.vmt');
+          const sourcePath = resolveAsset(vmtRel);
+          if (!sourcePath) continue;
           try {
-            fse.copySync(sourcePath, destPath);
+            fse.copySync(sourcePath, path.join(outputDir, vmtRel));
             await VTFfromVMT(gamepath, sourcePath, outputDir);
           } catch (error) {
             handleError(error);
@@ -294,8 +308,8 @@ async function getSounds(gamepath, vmfContent, outputDir, file) {
   // Extract from soundscapes
   if (vmfContent.includes('soundscape')) {
     const filename = `soundscapes_${path.basename(file).replace('.vmf', '.txt')}`;
-    const soundscapesPath = path.join(gamepath, 'scripts', filename);
-    if (fs.existsSync(soundscapesPath)) {
+    const soundscapesPath = resolveAsset(path.join('scripts', filename));
+    if (soundscapesPath) {
       try {
         fse.copySync(soundscapesPath, path.join(outputDir, 'scripts', filename));
         const soundscapesContent = fs.readFileSync(soundscapesPath, 'utf-8');
@@ -326,7 +340,8 @@ async function getSounds(gamepath, vmfContent, outputDir, file) {
 
   // Copy sound files
   for (const sound of sounds) {
-    const sourcePath = path.join(gamepath, 'sound', sound);
+    const sourcePath = resolveAsset(path.join('sound', sound));
+    if (!sourcePath) continue;
     const destPath = path.join(outputDir, 'sound', sound.toLowerCase());
     try {
       fse.copySync(sourcePath, destPath);
@@ -360,19 +375,19 @@ async function getOthers(gamepath, vmfContent, outputDir, file) {
   const addpackfile = (insidepath) => {
     const formattedPath = insidepath.replace(/\\/g, '/');
     if (!filetopack.includes(formattedPath)) {
-      filetopack.push(formattedPath, path.join(gamepath, insidepath));
+      filetopack.push(formattedPath, resolveAsset(insidepath) || path.join(gamepath, insidepath));
     }
   };
 
   // Check for file existence and push to files array
   await Promise.all(bspvariants.map(async (variant) => {
-    const sourcePath = path.join(gamepath, 'maps', variant.replace('%mapname%', mapname));
-    if (fs.existsSync(sourcePath)) files.push(sourcePath.slice(gamepath.length + 1));
+    const rel = path.join('maps', variant.replace('%mapname%', mapname));
+    if (resolveAsset(rel)) files.push(rel);
   }));
 
   // Extract particle files and referenced VMTS
-  const particlesPath = path.join(gamepath, `maps/${mapname}_particles.txt`);
-  if (fs.existsSync(particlesPath)) {
+  const particlesPath = resolveAsset(path.join('maps', `${mapname}_particles.txt`));
+  if (particlesPath) {
     addpackfile(`maps/${mapname}_particles.txt`);
     const content = fs.readFileSync(particlesPath, 'utf-8');
     const matches = content.match(/"file"\s+"([^"]+)"/g);
@@ -381,14 +396,16 @@ async function getOthers(gamepath, vmfContent, outputDir, file) {
         const file = line.match(/"file"\s+"([^"]+)"/)[1];
         files.push(file);
         if (file.endsWith('.pcf')) {
-          const pcfPath = path.join(gamepath, file);
-          if (fs.existsSync(pcfPath)) {
+          const pcfPath = resolveAsset(file);
+          if (pcfPath) {
             const text = fs.readFileSync(pcfPath, 'latin1');
             const vmtMatches = text.match(/[\w\/\\.-]+\.vmt/g);
             if (vmtMatches) {
               for (const vmt of vmtMatches) {
-                const sourcePath = path.join(gamepath, 'materials', vmt);
-                const destPath = path.join(outputDir, 'materials', vmt);
+                const vmtRel = path.join('materials', vmt);
+                const sourcePath = resolveAsset(vmtRel);
+                if (!sourcePath) continue;
+                const destPath = path.join(outputDir, vmtRel);
                 try {
                   await fse.copy(sourcePath, destPath);
                   await VTFfromVMT(gamepath, sourcePath, outputDir);
@@ -404,8 +421,7 @@ async function getOthers(gamepath, vmfContent, outputDir, file) {
   }
 
   // Check for soundscapes file
-  const soundscapesPath = path.join(gamepath, 'scripts', `soundscapes_${mapname}.txt`);
-  if (fs.existsSync(soundscapesPath)) {
+  if (resolveAsset(path.join('scripts', `soundscapes_${mapname}.txt`))) {
     addpackfile(`scripts/soundscapes_${mapname}.txt`);
   }
 
@@ -434,7 +450,8 @@ async function getOthers(gamepath, vmfContent, outputDir, file) {
 
   // Copy files to output directory
   await Promise.all(files.map(async (file) => {
-    const sourcePath = path.join(gamepath, file);
+    const sourcePath = resolveAsset(file);
+    if (!sourcePath) return;
     const destPath = path.join(outputDir, file);
     try {
       await fse.copy(sourcePath, destPath);
@@ -554,6 +571,9 @@ async function script(gamepath, file, matbool, mdlbool, soundbool, publishbool) 
     const config = { gamepath };
     fse.ensureDirSync(path.join(process.env.APPDATA, 'MapScraper'));
     fs.writeFileSync(path.join(process.env.APPDATA, 'MapScraper', 'config.json'), JSON.stringify(config, null, 2));
+
+    currentGamepath = gamepath;
+    resolveAsset = createResolver(getAddonRoots(gamepath));
 
     const vmfContent = fs.readFileSync(file, 'utf-8');
     const outputDir = `./${path.basename(file).replace('.vmf', '')}`;
